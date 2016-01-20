@@ -1,0 +1,126 @@
+rm(list=ls(all=TRUE))
+gc()
+
+
+
+
+##dir
+{
+# homedir <- "//matfic00/Utilisateurs-AXC/C-WANG/Personnel/Kaggle/Titanic"
+homedir <- "/Users/chengmingwang/Google Drive/KaggleMaster/Titanic"
+
+codedir <- file.path(homedir, "codes")
+datadir <- file.path(homedir, "data")
+outputdir <- file.path(homedir, "output")
+
+source("/Users/chengmingwang/Google Drive/KaggleMaster/Toolbox160107.r")
+}
+
+###packages
+{
+##data
+library(ggplot2)
+library(data.table)
+library(lubridate)
+library(dummies)
+library(stringr)
+library(dplyr)
+library(tidyr)
+library(readr)
+# library(tm)
+# library(readxl)
+# library(reshape2)
+# library(RSQLite)
+# library(compare)
+
+##model
+library(gbm)
+library(xgboost)
+library(randomForest)
+library(glmnet)
+library(leaps)
+library(Ckmeans.1d.dp)
+library(DiagrammeR)
+library(pROC)
+library(glmnet)
+library(rpart)
+library(mice)
+library(rpart)
+library(rpart.plot)
+library(rattle)
+library(party)
+library(RColorBrewer)
+}
+
+
+###load pretreat data
+{
+load(file = file.path(datadir, 'pretreat/data2.Rda'))
+# full[,Survived:=as.factor(Survived)]
+train <- full[PassengerId %in% train.id,]
+test <- full[PassengerId %in% test.id,]
+}
+
+
+###ensemble
+{
+tm <- GetSysTime()
+mth <- "ranForest+cforest"
+writedir <- file.path(outputdir, paste("model",paste(tm,mth,sep = "_"),sep="/"))
+CreatDirIfNotExist(writedir)
+setwd(writedir)
+set.seed(7)
+
+
+# feat<-c("Pclass","Sex","Age","SibSp","Parch","Fare","Embarked","Pref2","FamilyNum","FamilyID","Mother","Child")
+feat<-c("Pclass","Sex","Age","SibSp","Parch","Fare","Embarked","Pref2","FamilyNum","FamilyID")
+
+# feat<-c("Pclass","Sex","Age","SibSp","Parch","Fare","Embarked","Pref2","FamilyNum","FamilyID2")
+
+xdata <- data.matrix(train[,feat,with=F])
+ydata <- as.factor(data.matrix(train[,"Survived",with=F]))
+
+
+set.seed(7)
+# rF1 <- randomForest(as.factor(Survived) ~ Pclass + Sex + Age + SibSp + Parch + Fare + Embarked + Pref2 + 
+#                       FamilyNum +FamilyID2, data=train, importance=TRUE, ntree=2000)
+rF1 <- randomForest(x=xdata, y=ydata, importance=TRUE, ntree=2000)
+varImpPlot(rF1)
+# Prediction.rF1 <- predict(rF1, data.matrix(test[,feat,with=F]))
+# Prediction.rF1 <- as.numeric(as.character(predict(rF1, data.matrix(test[,feat,with=F]))))
+Prediction.rF1 <- as.numeric(as.character(predict(rF1, data.matrix(full[,feat,with=F]))))
+
+
+cF1 <- cforest(as.factor(Survived) ~ Pclass + Sex + Age + SibSp + Parch + Fare + Embarked + Pref2 + FamilyNum + FamilyID,
+               data = train, controls=cforest_unbiased(ntree=2000, mtry=3))
+# Prediction.cF1 <- as.numeric(as.character(predict(cF1, test, OOB=TRUE, type = "response")))
+Prediction.cF1 <- as.numeric(as.character(predict(cF1, full, OOB=TRUE, type = "response")))
+
+# Prediction<-round((Prediction.rF1+Prediction.cF1)/2,0)
+# Prediction<-round((Prediction.rF1+Prediction.cF1)/2+0.2,0)
+
+full2 <- cbind(full,Prediction.rF1)
+full2 <- cbind(full2,Prediction.cF1)
+train2 <- full2[PassengerId %in% train.id,]
+test2 <- full2[PassengerId %in% test.id,]
+
+
+# cF2 <- cforest(as.factor(Survived) ~ Pclass + Sex + Age + SibSp + Parch + Fare + Embarked
+#                + Pref2 + FamilyNum + FamilyID + Prediction.rF1 + Prediction.cF1,
+#                data = train2, controls=cforest_unbiased(ntree=2000, mtry=3))
+# Prediction.cF2 <- as.numeric(as.character(predict(cF2, test2, OOB=TRUE, type = "response")))
+
+feat2<-c("Pclass","Sex","Age","SibSp","Parch","Fare","Embarked","Pref2","FamilyNum","FamilyID","Prediction.rF1","Prediction.cF1")
+xdata2 <- data.matrix(train2[,feat2,with=F])
+ydata2 <- as.factor(data.matrix(train2[,"Survived",with=F]))
+rF2 <- randomForest(x=xdata2, y=ydata2, importance=TRUE, ntree=4000,mtry=4)
+Prediction.rF2 <- as.numeric(as.character(predict(rF2, data.matrix(test2[,feat2,with=F]))))
+varImpPlot(rF2)
+
+
+# submission <- data.frame(PassengerId = test$PassengerId, Survived = Prediction.cF2)
+submission <- data.frame(PassengerId = test$PassengerId, Survived = Prediction.rF2)
+
+write.csv(submission,file.path(writedir,paste0("sub",mth,tm,".csv")),row.names = F)
+
+}
